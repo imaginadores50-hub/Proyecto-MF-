@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>HidroLab · Avance 1</title>
+<!--
+ HidroLab: simulador de flujo entre depósitos con tuberías en serie y bomba opcional
+ Mecánica de Fluidos · CUCEI · UdeG · 2026B · Equipo 04 · Versión: Primer avance (v0.1) · 12-nov-2026
+ Herramienta de IA: Claude (Anthropic). Generado por IA a partir de la maqueta del equipo; el equipo debe revisar y completar la atribución (Anexo B).
+ Numeración "Ec. (n)" = la del panel de documentación de esta app (debe copiarse igual al reporte Word).
+-->
+<style>
+:root{--ink:#14232b;--mut:#51636b;--bg:#eef2f1;--pan:#fff;--line:#cfd8d6;--acc:#0b6e75;--warn:#8a5200;--wbg:#fff4de;--err:#a3262a;--ebg:#fde8e8;--ok:#1b6b3a;font:14px/1.45 system-ui,"Segoe UI",Roboto,sans-serif}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink)}
+header{background:var(--ink);color:#fff;padding:12px 20px;display:flex;flex-wrap:wrap;gap:10px 24px;align-items:center;justify-content:space-between}
+header h1{font-size:19px;margin:0}header small{color:#b8cbd0;display:block;font-weight:400}
+.seg button{border:1px solid #5f7a82;background:transparent;color:#fff;padding:5px 14px;cursor:pointer}.seg button.on{background:#fff;color:var(--ink)}
+.btn{border:1px solid var(--acc);background:#fff;color:var(--acc);padding:5px 12px;cursor:pointer;border-radius:4px}
+main{display:grid;grid-template-columns:minmax(310px,400px) 1fr;gap:14px;padding:14px;max-width:1500px;margin:auto}
+@media(max-width:900px){main{grid-template-columns:1fr}}
+section,aside>fieldset{background:var(--pan);border:1px solid var(--line);border-radius:6px;padding:10px 12px;margin:0 0 12px}
+fieldset legend{font-weight:600;padding:0 6px}
+.row{display:grid;grid-template-columns:1fr 62px 84px;gap:2px 8px;align-items:center;margin:5px 0}
+.row label{grid-column:1/-1;font-size:13px}.row .lim{grid-column:1/-1;color:var(--mut);font-size:11.5px;margin-top:-2px}
+.row input[type=range]{width:100%}.row input[type=number]{width:100%;padding:3px;border:1px solid var(--line);border-radius:3px}
+.row input.bad{border-color:var(--err);background:var(--ebg)}.row .u{font-size:12px;color:var(--mut)}
+select{width:100%;padding:4px;margin:3px 0}
+.msg{padding:6px 10px;border-radius:4px;margin:5px 0;font-size:13px}.w{background:var(--wbg);color:var(--warn)}.e{background:var(--ebg);color:var(--err)}.i{background:#e6f1f2;color:#0a4f55}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+.card{background:var(--bg);border-radius:5px;padding:7px 10px}.card b{display:block;font-size:17px}.card span{font-size:12px;color:var(--mut)}
+table{border-collapse:collapse;width:100%;font-size:12.5px}td,th{padding:3px 6px;border-bottom:1px solid var(--line);text-align:right}th{color:var(--mut)}td:first-child,th:first-child{text-align:left}
+.scroll{overflow-x:auto}.stale{opacity:.35}svg text{font:11px system-ui,sans-serif;fill:var(--ink)}
+details{margin:6px 0}summary{cursor:pointer;font-weight:600}code,.eq{font-family:Consolas,monospace;font-size:12.5px}.eq{display:block;margin:2px 0 2px 12px}
+h2{font-size:15px;margin:0 0 6px}
+</style></head><body>
+<header><div><h1>HidroLab <small>Flujo entre depósitos con tuberías en serie y bomba opcional · Primer avance (prototipo, validación pendiente)</small></h1></div>
+<div style="display:flex;gap:10px;align-items:center"><span class="seg"><button id="bSI" class="on">SI</button><button id="bEN">Inglés</button></span><button class="btn" id="bReset" style="background:none;color:#fff;border-color:#fff">Restablecer ejemplo</button></div></header>
+<main><aside id="ctl"></aside>
+<div><section><h2>Esquema (cargas en el eje z = 0)</h2><div id="msgs"></div><svg id="sch" viewBox="0 0 760 380" width="100%" role="img" aria-label="Esquema del sistema"></svg>
+<div class="msg i" style="font-size:12px">Alturas/cargas a escala vertical. Diámetros exagerados (espesor = 4 + 56·D px, D en m, no a escala). Distancia horizontal: sólo L₁:L₂ es proporcional. Línea azul: energía (Ec. 14); verde: piezométrica; α = 1.</div></section>
+<section id="res"></section>
+<section><h2>Curva de bomba y curva del sistema</h2><svg id="chart" viewBox="0 0 520 260" width="100%" style="max-width:620px"></svg></section>
+<section id="doc"></section></div></main>
+<script>
+/*PURE_START*/
+/* ===== 1. CONSTANTES Y CONVERSIONES (estado interno siempre en SI) ===== */
+const G=9.80665;                                   // m/s², g normalizada
+const UF={len:{si:['m',1],en:['ft',0.3048]},dia:{si:['mm',1e-3],en:['in',0.0254]},P:{si:['kPa',1000],en:['psi',6894.757293168]},
+ Q:{si:['L/s',1e-3],en:['gpm',3.785411784e-3/60]},rho:{si:['kg/m³',1],en:['lbm/ft³',16.01846337]},mu:{si:['Pa·s',1],en:['lbm/(ft·s)',1.488163944]},
+ vel:{si:['m/s',1],en:['ft/s',0.3048]},area:{si:['m²',1],en:['ft²',0.09290304]},Q3:{si:['m³/s',1],en:['ft³/s',0.028316846592]},
+ T:{si:['°C',1],en:['°F',1]},k:{si:['',1],en:['',1]}};
+let UNIT='si';
+const toU=(k,v,u=UNIT)=>k==='T'?(u==='si'?v:v*9/5+32):v/UF[k][u][1];
+const fromU=(k,x,u=UNIT)=>k==='T'?(u==='si'?x:(x-32)*5/9):x*UF[k][u][1];
+const uL=(k,u=UNIT)=>UF[k][u][0];
+const fmtN=(x,d=4)=>x===0?'0':(Math.abs(x)<1e-3||Math.abs(x)>=1e6)?x.toExponential(d-1):Number(x.toPrecision(d)).toString();
+const fm=(k,v,d=4)=>fmtN(toU(k,v),d)+(uL(k)?' '+uL(k):'');
+
+/* ===== 2. PROPIEDADES (sólo datos con respaldo; ver panel de fuentes) ===== */
+const FLUIDS={agua:{nombre:'Agua líquida pura (0–60 °C)',Tmin:0,Tmax:60,
+ rho:T=>1000*(1-((T-3.9863)**2*(T+288.9414))/(508929.2*(T+68.12963))),     // Ec. (18a) kg/m³
+ mu:T=>2.414e-5*10**(247.8/(T+133.15)),                                    // Ec. (18b) Pa·s
+ pv:T=>610.94*Math.exp(17.625*T/(T+243.04))},                              // Ec. (18c) Pa
+ perso:{nombre:'Fluido personalizado (datos del usuario)'}};
+const MAT={liso:{n:'Tubo estirado (liso)',e:1.5e-6},acero:{n:'Acero comercial',e:4.5e-5},galv:{n:'Hierro galvanizado',e:1.5e-4},fundido:{n:'Hierro fundido',e:2.6e-4}}; // ε en m
+const KENT=0.5,KEXIT=1.0;                           // Çengel & Cimbala: entrada de borde vivo, descarga a depósito (ref. V del tramo)
+function propsOf(S){
+ if(S.fl==='agua'){const T=S.T;return{rho:FLUIDS.agua.rho(T),mu:FLUIDS.agua.mu(T),pv:FLUIDS.agua.pv(T),pvOk:true};}
+ return{rho:S.rhoC,mu:S.muC,pv:S.pvC==null?null:S.pvC,pvOk:S.pvC!=null};
+}
+/* ===== 3. ENTRADAS: [clave, etiqueta, magnitud, mín, máx, defecto, grupo, opcional] (valores internos SI) ===== */
+const PAR=[['T','Temperatura T','T',0,60,20,'Fluido'],
+ ['rhoC','Densidad ρ (personalizado)','rho',100,20000,1000,'Fluido'],['muC','Viscosidad μ (personalizado)','mu',1e-5,1000,1e-3,'Fluido'],['pvC','Presión de vapor pᵥ (opcional)','P',0,2e6,null,'Fluido',1],
+ ['Pa','Presión atmosférica pₐtm','P',6e4,1.1e5,81000,'Depósitos'],['zA','Superficie libre A, z_A','len',-20,50,8,'Depósitos'],['zB','Superficie libre B, z_B','len',-20,50,2,'Depósitos'],
+ ['D1','Diámetro interior D₁','dia',0.01,0.5,0.1,'Tubería'],['L1','Longitud L₁','len',0.5,1000,40,'Tubería'],['D2','Diámetro interior D₂','dia',0.01,0.5,0.075,'Tubería'],['L2','Longitud L₂','len',0.5,1000,60,'Tubería'],
+ ['Kacc1','ΣK accesorios tramo 1 (ref. V₁)','k',0,50,4,'Accesorios'],['Kacc2','ΣK accesorios tramo 2 (ref. V₂)','k',0,50,0,'Accesorios'],['Ktr','K transición (opcional, ref. V₂; vacío = automático)','k',0,50,null,'Accesorios',1],
+ ['H0','Carga a Q = 0, H₀','len',0,200,12,'Bomba'],['Q0','Caudal a carga cero, Q₀','Q',1e-4,0.5,0.06,'Bomba'],['NPSHr','NPSH requerido (opcional; de curva del fabricante al Q analizado)','len',0,100,null,'Bomba',1]];
+const defaults=()=>{const S={fl:'agua',mat1:'acero',mat2:'acero',trOn:true,pump:true};PAR.forEach(p=>S[p[0]]=p[5]);return S;};
+function validate(S){const er=[];
+ PAR.forEach(p=>{const[k,l,m,lo,hi,,,opt]=p,v=S[k];
+  if(v==null||v===''){if(!opt&&!(S.fl==='agua'&&(k==='rhoC'||k==='muC'))&&!(S.fl!=='agua'&&k==='T'&&false))er.push(l+': dato requerido');return;}
+  if(!Number.isFinite(v)){er.push(l+': no es un número');return;}
+  if((k==='rhoC'||k==='muC')&&S.fl==='agua')return;if(k==='T'&&S.fl!=='agua')return;
+  if(v<lo||v>hi)er.push(`${l}: ${fm(m,v)} fuera del intervalo [${fmtN(toU(m,lo))}, ${fmtN(toU(m,hi))}] ${uL(m)}`);});
+ return er;}
+/* ===== 4. MODELO HIDRÁULICO ===== */
+function colebrook(Re,rr){let x=-1.8*Math.log10(Math.pow(rr/3.7,1.11)+6.9/Re);          // semilla Haaland
+ for(let i=0;i<100;i++){const xn=-2*Math.log10(rr/3.7+2.51*x/Re);if(Math.abs(xn-x)<1e-13){x=xn;break;}x=xn;} return 1/(x*x);}   // Ec. (4)
+function darcyF(Re,rr){ // factor de DARCY (no Fanning)
+ if(Re<=2000)return 64/Re;                                                               // Ec. (5)
+ if(Re>=4000)return colebrook(Re,rr);
+ const f2=0.032,f4=colebrook(4000,rr);return f2+(f4-f2)*(Re-2000)/2000;}                  // Ec. (6) interpolación lineal; NO es ley física validada
+function seg(Q,D,L,eps,pr){const A=Math.PI*D*D/4,V=Q/A,Re=pr.rho*Math.abs(V)*D/pr.mu;       // Ec. (1)-(3)
+ let f=null,hf=0,reg='—';if(Q>0){f=darcyF(Re,eps/D);hf=f*(L/D)*V*V/(2*G);reg=Re<2000?'Laminar':Re<=4000?'Transición (aprox.)':'Turbulento';} // Ec. (7)
+ return{A,V,Re,f,hf,reg,vh:V*V/(2*G),D,L,rr:eps/D};}
+function transK(S){const{D1,D2}=S;if(!S.trOn)return{K:0,ref:2,t:'omitida'};
+ if(S.Ktr!=null)return{K:S.Ktr,ref:2,t:'ingresado'};if(Math.abs(D1-D2)<1e-9)return{K:0,ref:2,t:'sin cambio de D'};
+ if(D2<D1){const b=D2/D1;return{K:0.42*(1-b*b),ref:2,t:'contracción brusca'};}              // Ec. (9)
+ const b=D1/D2;return{K:(1-b*b)**2,ref:1,t:'expansión brusca (Borda–Carnot)'};}            // Ec. (10)
+const Hb=(Q,S)=>S.pump?S.H0*(1-(Q/S.Q0)**2):0;                                              // Ec. (11)
+function losses(Q,S,pr){const a=seg(Q,S.D1,S.L1,MAT[S.mat1].e,pr),b=seg(Q,S.D2,S.L2,MAT[S.mat2].e,pr),t=transK(S),vt=t.ref===1?a.vh:b.vh;
+ const it=[{n:'Entrada depósito A',K:KENT,ref:1,h:KENT*a.vh},{n:'Fricción tramo 1',h:a.hf},{n:'Accesorios tramo 1',K:S.Kacc1,ref:1,h:S.Kacc1*a.vh},
+  {n:'Transición D₁→D₂ ('+t.t+')',K:t.K,ref:t.ref,h:t.K*vt},{n:'Fricción tramo 2',h:b.hf},{n:'Accesorios tramo 2',K:S.Kacc2,ref:2,h:S.Kacc2*b.vh},
+  {n:'Salida al depósito B',K:KEXIT,ref:2,h:KEXIT*b.vh}];                                  // Ec. (8)
+ return{a,b,t,it,sum:it.reduce((s,x)=>s+x.h,0)};}
+const resid=(Q,S,pr)=>S.zA+Hb(Q,S)-S.zB-losses(Q,S,pr).sum;                                  // Ec. (13)
+/* ===== 5. SOLUCIÓN NUMÉRICA (bisección con intervalo) ===== */
+const NUM={TOL_Q_ABS:1e-12,TOL_Q_REL:1e-10,TOL_R:1e-6,MAXIT:200,QCAP:100};   // m³/s, -, m, -, m³/s
+function bisect(S,pr,lo,hi){let it=0;while(it<NUM.MAXIT&&hi-lo>NUM.TOL_Q_ABS+NUM.TOL_Q_REL*hi){const m=(lo+hi)/2;if(resid(m,S,pr)>0)lo=m;else hi=m;it++;}return{Q:(lo+hi)/2,it,conv:it<NUM.MAXIT};}
+const NOROOT='No se encontró un punto de operación dentro del intervalo válido de la curva de bomba';
+function solve(S,pr){const eq=1e-9;
+ if(S.pump){const F0=resid(0,S,pr);
+  if(F0<-eq)return{st:'noroot',msg:NOROOT+': la carga de cierre H₀ no alcanza para el sentido A→B (esto no implica por sí mismo que ningún flujo físico sea posible).'};
+  if(Math.abs(F0)<=eq)return{st:'ok',Q:0,it:0};
+  if(resid(S.Q0,S,pr)>0)return{st:'noroot',msg:NOROOT+': incluso con carga de bomba nula en Q₀ la carga disponible supera las pérdidas; el caudal de equilibrio excede Q₀.'};
+  return{st:'ok',...bisect(S,pr,0,S.Q0)};}
+ const F0=S.zA-S.zB;
+ if(F0<-eq)return{st:'reverse',msg:'El posible flujo inverso está fuera del alcance del prototipo (z_A < z_B sin bomba).'};
+ if(Math.abs(F0)<=eq)return{st:'ok',Q:0,it:0};
+ let hi=1e-4;while(resid(hi,S,pr)>0){hi*=2;if(hi>NUM.QCAP)return{st:'fail',msg:`No se encerró la raíz hasta Q = ${NUM.QCAP} m³/s (límite documentado): el modelo no tiene resistencia suficiente para un caudal estacionario finito.`};}
+ return{st:'ok',...bisect(S,pr,0,hi)};}
+/* ===== 6. EVALUACIÓN COMPLETA, PRESIONES, NPSH, ADVERTENCIAS ===== */
+function compute(S){
+ const er=validate(S);if(er.length)return{ok:false,errs:er};
+ const w=[],pr=propsOf(S);
+ if(S.fl==='agua'&&(S.T<FLUIDS.agua.Tmin||S.T>FLUIDS.agua.Tmax))return{ok:false,errs:['T fuera del rango de las correlaciones del agua']};
+ if(!(pr.rho>0&&pr.mu>0))return{ok:false,errs:['ρ y μ deben ser positivas']};
+ const sol=solve(S,pr);
+ if(sol.st!=='ok')return{ok:false,errs:[],stop:sol.msg,st:sol.st,pr};
+ const Q=sol.Q,L=losses(Q,S,pr),hp=Hb(Q,S),r=S.zA+hp-S.zB-L.sum,{a,b}=L,[i0,i1,i2,i3,i4,i5,i6]=L.it;
+ if(!(Math.abs(r)<=NUM.TOL_R))return{ok:false,errs:[],stop:`Falta de convergencia: residuo |r_H| = ${fmtN(Math.abs(r))} m > tolerancia ${NUM.TOL_R} m.`,pr};
+ const E=[S.zA,S.zA-i0.h]; E.push(E[1]+hp);E.push(E[2]-i1.h);E.push(E[3]-i2.h);E.push(E[4]-i3.h);E.push(E[5]-i4.h);E.push(E[6]-i5.h);E.push(E[7]-i6.h); // Ec. (14) nodos n0..n8
+ const Vn=[0,a.V,a.V,a.V,a.V,b.V,b.V,b.V,0];
+ const H=E.map((e,i)=>e-Vn[i]*Vn[i]/(2*G));                                                 // línea piezométrica (α=1)
+ const names=['Aspiración de bomba (tras entrada)','Descarga de bomba','Fin de fricción tramo 1','Tras accesorios tramo 1','Tras transición','Fin de fricción tramo 2','Tras accesorios tramo 2'];
+ const pres=names.map((n,j)=>{const P=S.Pa+pr.rho*G*H[j+1];return{n,h:H[j+1],P,low:pr.pv!=null&&P<pr.pv};});   // Ec. (15), z = 0
+ const npsha=(S.pump&&pr.pv!=null)?(S.Pa-pr.pv)/(pr.rho*G)+S.zA-i0.h:null;                    // Ec. (16)
+ if(Q===0)w.push('Q = 0: sin pérdidas; f no aplica.');
+ [a,b].forEach((s,i)=>{if(s.reg.startsWith('Trans'))w.push(`Tramo ${i+1}: Re = ${fmtN(s.Re)} en transición (2000–4000); f es una interpolación aproximada.`);if(s.reg==='Laminar'&&Q>0)w.push(`Tramo ${i+1} laminar: α = 2 real; la hipótesis α = 1 de las líneas de energía/piezométrica es sólo aproximada.`);if(s.rr>0.05)w.push(`Tramo ${i+1}: ε/D > 0.05 fuera del dominio de Colebrook.`);});
+ if(!S.trOn&&Math.abs(S.D1-S.D2)>1e-9)w.push('Transición omitida con D₁ ≠ D₂: se desprecia la pérdida del cambio de diámetro (resultado no conservador).');
+ if(!S.pump)w.push('Bomba apagada: componente idealmente puenteado, sin pérdida adicional (una bomba real detenida sí opone resistencia).');
+ else w.push(`Curva de bomba didáctica H₀[1−(Q/Q₀)²], válida sólo para 0 ≤ Q ≤ Q₀ = ${fm('Q',S.Q0)}; no se extrapola.`);
+ if(pr.pv==null)w.push('Presión de vapor no disponible: no se evalúa riesgo de cavitación.');
+ if(pres.some(p=>p.low))w.push('Presión calculada < presión de vapor: el modelo monofásico deja de ser válido; el resultado es una extrapolación del modelo.');
+ if(pres.some(p=>p.P<0))w.push('Presión absoluta negativa: físicamente imposible; revise las entradas.');
+ if(S.pump&&S.NPSHr==null)w.push('NPSH disponible calculado; comparación con NPSH requerido pendiente');
+ else if(S.pump&&npsha!=null)w.push(`NPSHd ${fm('len',npsha)} ${npsha>=S.NPSHr?'≥':'<'} NPSHr ${fm('len',S.NPSHr)} (una comparación puntual no garantiza ausencia de cavitación).`);
+ return{ok:true,S,pr,Q,it:sol.it,L,a,b,hp,r,E,H,Vn,pres,npsha,w,cont:pr.rho*a.A*a.V-pr.rho*b.A*b.V};}
+/* ===== 7. PRUEBAS INTERNAS ===== */
+function selfTests(){const T=[],t=(n,ok,d)=>T.push([n,!!ok,d||'']),D=defaults(),mk=o=>Object.assign(defaults(),o);
+ let R=compute(D);t('Ejemplo inicial resuelve',R.ok,R.ok&&fmtN(R.Q*1000)+' L/s');
+ R=compute(mk({pump:false,zA:5,zB:5}));t('1 Q=0 con niveles iguales sin bomba',R.ok&&R.Q===0&&R.a.f===null&&R.L.sum===0);
+ R=compute(mk({pump:false,zA:2,zB:8}));t('2 Flujo inverso fuera de alcance',!R.ok&&R.st==='reverse',R.stop);
+ R=compute(D);t('3 Continuidad ρA₁V₁=ρA₂V₂',Math.abs(R.cont)<1e-9*R.pr.rho*R.Q+1e-15);
+ t('4 Cierre del balance |r_H|<1e-6 m',Math.abs(R.r)<1e-6&&Math.abs(R.E[8]-D.zB)<1e-6,fmtN(R.r));
+ R=compute(mk({fl:'perso',rhoC:1260,muC:1.4,pump:false,zA:5,zB:2}));t('5 Laminar (f=64/Re)',R.ok&&R.a.reg==='Laminar'&&Math.abs(R.a.f-64/R.a.Re)<1e-12,'Re₁='+fmtN(R.a.Re));
+ R=compute(D);t('6 Turbulento',R.a.reg==='Turbulento'&&R.b.reg==='Turbulento','Re₁='+fmtN(R.a.Re));
+ R=compute(mk({fl:'perso',rhoC:1000,muC:0.014,pump:false,zA:3.5,zB:2,D1:0.05,D2:0.05,L1:20,L2:20}));t('7 Advertencia de transición',R.ok&&R.w.some(x=>x.includes('transición')),R.ok&&'Re₁='+fmtN(R.a.Re));
+ const q=o=>compute(mk(o)).Q;t('8 Más K ⇒ menor Q; más L ⇒ menor Q',q({Kacc1:10})<q({})&&q({L2:150})<q({}));
+ t('9 Transición con pérdida reduce Q',q({trOn:true})<q({trOn:false}));
+ R=compute(D);t('10 Punto de operación de bomba válido',R.ok&&R.Q>0&&R.Q<D.Q0&&R.hp>0,fmtN(R.Q*1000)+' L/s, Hb='+fmtN(R.hp)+' m');
+ R=compute(mk({H0:1,zA:0,zB:8}));t('11a Sin raíz: H₀ insuficiente',!R.ok&&R.stop.startsWith(NOROOT));
+ R=compute(mk({Q0:0.001,H0:50,zA:20,zB:0}));t('11b Sin raíz: raíz > Q₀',!R.ok&&R.stop.startsWith(NOROOT));
+ let ok=true;PAR.forEach(p=>{const v=p[5]==null?(p[3]+p[4])/2:p[5];['en','si'].forEach(u=>{if(Math.abs(fromU(p[2],toU(p[2],v,u),u)-v)>1e-9*Math.abs(v)+1e-15)ok=false;});});
+ const R2=compute(D);UNIT='en';const Qen=fm('Q3',R2.Q);UNIT='si';t('12 Conversión ida y vuelta; 1 m³/s = 35.3147 ft³/s',ok&&Math.abs(toU('Q3',1,'en')-35.3147)<1e-3&&R2.ok);
+ R=compute(mk({D1:-1}));t('13a Entrada inválida (D₁<0) rechazada',!R.ok&&R.errs.length>0);R=compute(mk({T:150}));t('13b T fuera de rango rechazada',!R.ok);R=compute(mk({H0:null}));t('13c Dato faltante rechazado',!R.ok);
+ R=compute(mk({pump:false,zA:8,zB:2,D1:0.5,D2:0.5,Kacc1:0,Kacc2:0,L1:0.5,L2:0.5,trOn:false}));const Vb=Math.sqrt(2*G*6/(KENT+KEXIT));
+ t('Límite: L→0 y sin accesorios ⇒ Bernoulli con K_ent+K_sal (V≈√(2gΔz/1.5), ±2 %)',R.ok&&Math.abs(R.a.V-Vb)/Vb<0.02,'V='+fmtN(R.a.V)+' vs '+fmtN(Vb)+' m/s');
+ return T;}
+/*PURE_END*/
+if(typeof document!=='undefined'){
+let S=defaults(),bad={},last=null;const $=i=>document.getElementById(i),jsErr=[];addEventListener('error',e=>jsErr.push(e.message));
+/* ===== 8. INTERFAZ ===== */
+function build(){let h='',g='';
+ const grp=['Fluido','Depósitos','Tubería','Accesorios','Bomba'];
+ grp.forEach(G0=>{h+=`<fieldset><legend>${G0==='Tubería'?'Tuberías':G0==='Bomba'?'Bomba (opcional)':G0}</legend>`;
+  if(G0==='Fluido')h+=`<select id="fl" aria-label="Fluido"><option value="agua">${FLUIDS.agua.nombre}</option><option value="perso">${FLUIDS.perso.nombre}</option></select>`;
+  if(G0==='Tubería')h+=`<label>Material tramo 1 (ε: Çengel &amp; Cimbala, Tabla 8-2)<select id="mat1">${Object.entries(MAT).map(([k,m])=>`<option value="${k}">${m.n} (${m.e*1000} mm)</option>`).join('')}</select></label><label>Material tramo 2<select id="mat2">${Object.entries(MAT).map(([k,m])=>`<option value="${k}">${m.n} (${m.e*1000} mm)</option>`).join('')}</select></label>`;
+  if(G0==='Accesorios')h+=`<div class="msg i">Entrada A: K = 0.5 (borde vivo) y salida a B: K = 1.0, fijos (ref. V del tramo). Cada ΣK de accesorios es dato del usuario: tómelo de la Tabla 8-4 de Çengel &amp; Cimbala o del catálogo.</div><label><input type="checkbox" id="trOn"> Incluir pérdida de transición D₁→D₂ (cambio brusco)</label>`;
+  if(G0==='Bomba')h+=`<label><input type="checkbox" id="pump"> Bomba encendida (apagada = puenteada, sin pérdida)</label><div class="msg i">Curva didáctica H_b = H₀[1−(Q/Q₀)²], 0 ≤ Q ≤ Q₀; bomba en z = 0, junto a la salida de A.</div>`;
+  PAR.filter(p=>p[6]===G0).forEach(p=>{const[k,l,m,lo,hi]=p;h+=`<div class="row" id="r_${k}"><label for="n_${k}">${l}</label><input type="range" id="s_${k}"><input type="number" id="n_${k}" step="any"><span class="u" id="u_${k}"></span><span class="lim" id="l_${k}"></span></div>`;});
+  h+='</fieldset>';});
+ $('ctl').innerHTML=h;
+ PAR.forEach(p=>{const k=p[0];$('s_'+k).oninput=e=>{delete bad[k];S[k]=fromU(p[2],+e.target.value);sync(k);run();};
+  $('n_'+k).oninput=e=>{const t=e.target.value.trim();if(t===''){delete bad[k];S[k]=p[7]?null:NaN;if(!p[7])bad[k]=1;}else{const v=fromU(p[2],+t);S[k]=v;if(!Number.isFinite(v)||v<p[3]||v>p[4])bad[k]=1;else delete bad[k];}
+   e.target.classList.toggle('bad',!!bad[k]);if(!bad[k])sync(k,true);run();};});
+ ['fl','mat1','mat2'].forEach(k=>$(k).onchange=e=>{S[k]=e.target.value;run();});['trOn','pump'].forEach(k=>$(k).onchange=e=>{S[k]=e.target.checked;run();});}
+function sync(k,keepNum){const p=PAR.find(q=>q[0]===k),m=p[2],v=S[k],s=$('s_'+k),n=$('n_'+k);
+ s.min=toU(m,p[3]);s.max=toU(m,p[4]);s.step=(toU(m,p[4])-toU(m,p[3]))/500;
+ if(v!=null&&Number.isFinite(v)){s.value=toU(m,v);if(!keepNum)n.value=+toU(m,v).toPrecision(6);}else{s.value=s.min;if(!keepNum)n.value='';}
+ $('u_'+k).textContent=uL(m);$('l_'+k).textContent=`Límites: ${fmtN(toU(m,p[3]))} a ${fmtN(toU(m,p[4]))} ${uL(m)}${p[7]?' · opcional':''}`;}
+function syncAll(){PAR.forEach(p=>{bad={};sync(p[0]);$('n_'+p[0]).classList.remove('bad');});$('fl').value=S.fl;$('mat1').value=S.mat1;$('mat2').value=S.mat2;$('trOn').checked=S.trOn;$('pump').checked=S.pump;
+ $('bSI').classList.toggle('on',UNIT==='si');$('bEN').classList.toggle('on',UNIT==='en');
+ const ag=S.fl==='agua';['rhoC','muC','pvC'].forEach(k=>$('r_'+k).style.display=ag?'none':'');$('r_T').style.display=ag?'':'none';
+ ['H0','Q0','NPSHr'].forEach(k=>$('r_'+k).style.display=S.pump?'':'none');$('r_Ktr').style.display=S.trOn?'':'none';}
+function run(){syncAll();const nb=Object.keys(bad).length;let R;try{R=nb?{ok:false,errs:['Hay entradas inválidas (resaltadas en rojo); corríjalas.']}:compute(S);}catch(e){R={ok:false,errs:['Error interno: '+e.message]};}
+ last=R;render(R);}
+const msgs=(a,c)=>a.map(x=>`<div class="msg ${c}">${x}</div>`).join('');
+function render(R){const res=$('res');
+ if(!R.ok){$('msgs').innerHTML=msgs(R.errs||[],'e')+(R.stop?msgs([R.stop],R.st==='noroot'||R.st==='reverse'?'w':'e'):'');
+  res.innerHTML='<h2>Resultados</h2><div class="msg e">Resultados no vigentes: no hay solución válida para las entradas actuales.</div>';$('sch').innerHTML='<text x="380" y="190" text-anchor="middle">Esquema no vigente</text>';drawChart(null);return;}
+ const{Q,pr,a,b,L,hp,r,npsha}=R;$('msgs').innerHTML=msgs(R.w,'w');
+ const c=(l,v)=>`<div class="card"><span>${l}</span><b>${v}</b></div>`;
+ let h='<h2>Resultados generales</h2><div class="cards">'+c('Caudal Q',fm('Q',Q)+' = '+fm('Q3',Q))+c('ρ / μ',fm('rho',pr.rho)+' / '+fm('mu',pr.mu))+c('pᵥ',pr.pv==null?'sin dato':fm('P',pr.pv))+c('Σh_L (Ec. 12)',fm('len',L.sum))+c('H_b(Q)',fm('len',hp))+
+  c('Residuo r_H (Ec. 13)',fm('len',r,3))+c('Continuidad ρ(A₁V₁−A₂V₂)',fmtN(R.cont,3)+' kg/s')+c('NPSH disponible',npsha==null?'n/a':fm('len',npsha))+c('Iteraciones bisección',R.it)+'</div>';
+ h+='<h2 style="margin-top:12px">Por tramo</h2><div class="scroll"><table><tr><th>Tramo<th>D<th>L<th>A<th>V<th>Re<th>Régimen<th>f (Darcy)<th>h_f</tr>';
+ [a,b].forEach((s,i)=>h+=`<tr><td>${i+1}<td>${fm('dia',s.D,3)}<td>${fm('len',s.L)}<td>${fm('area',s.A,3)}<td>${fm('vel',s.V)}<td>${fmtN(s.Re,4)}<td>${s.reg}<td>${s.f==null?'No aplica':fmtN(s.f,4)}<td>${fm('len',s.hf)}</tr>`);
+ h+='</table></div><h2 style="margin-top:12px">Pérdidas (Ec. 7–10)</h2><div class="scroll"><table><tr><th>Componente<th>K<th>V de referencia<th>h</tr>';
+ L.it.forEach(x=>h+=`<tr><td>${x.n}<td>${x.K==null?'—':fmtN(x.K,4)}<td>${x.ref?'V'+x.ref+' = '+fm('vel',x.ref===1?a.V:b.V):'—'}<td>${fm('len',x.h)}</tr>`);
+ h+=`<tr><td><b>Total</b><td><td><td><b>${fm('len',L.sum)}</b></tr></table></div><h2 style="margin-top:12px">Presiones absolutas (Ec. 15)</h2><div class="scroll"><table><tr><th>Punto<th>h piezométrica<th>p abs<th>vs pᵥ</tr>`;
+ R.pres.forEach(p=>h+=`<tr><td>${p.n}<td>${fm('len',p.h)}<td>${fm('P',p.P)}<td>${pr.pv==null?'sin pᵥ':p.low?'<b style="color:var(--err)">p &lt; pᵥ</b>':'p ≥ pᵥ'}</tr>`);
+ res.innerHTML=h+'</table></div>';drawSch(R);drawChart(R);}
+function drawSch(R){const{S,E,H,pr,a,b}=R,x0=120,xB=640,xP=165,xJ=xP+40+(xB-xP-60)*S.L1/(S.L1+S.L2);
+ const all=[S.zA,S.zB,0,...E,...H];let lo=Math.min(...all),hi=Math.max(...all),sp=(hi-lo)||1;lo-=.1*sp;hi+=.12*sp;const Y=e=>28+(hi-e)/(hi-lo)*(330-28),y0=Y(0);
+ const th=d=>4+56*d,P=(pts)=>pts.map(q=>q.join(',')).join(' ');
+ const X=[x0,x0,xP,xP,xJ,xJ,xJ,xB,xB,xB];const eI=[0,1,1,2,3,4,5,6,7,8],hI=[0,1,1,2,3,4,5,6,7,8];
+ const Ep=[[x0,Y(E[0])],[x0,Y(E[1])],[xP,Y(E[1])],[xP,Y(E[2])],[xJ,Y(E[3])],[xJ,Y(E[4])],[xJ,Y(E[5])],[xB,Y(E[6])],[xB,Y(E[7])],[xB,Y(E[8])]];
+ const Hp=[[x0,Y(H[0])],[x0,Y(H[1])],[xP,Y(H[1])],[xP,Y(H[2])],[xJ,Y(H[3])],[xJ,Y(H[4])],[xJ,Y(H[5])],[xB,Y(H[6])],[xB,Y(H[7])],[xB,Y(H[8])]];
+ let o=`<rect x="20" y="${Y(S.zA)}" width="100" height="${Y(lo)-Y(S.zA)}" fill="#bcd9ea"/><rect x="${xB}" y="${Y(S.zB)}" width="100" height="${Y(lo)-Y(S.zB)}" fill="#bcd9ea"/>
+ <path d="M20 ${Y(S.zA)-10}V${Y(lo)}H120V${Y(S.zA)-10}M${xB} ${Y(S.zB)-10}V${Y(lo)}H740V${Y(S.zB)-10}" fill="none" stroke="#51636b" stroke-width="2"/>
+ <line x1="0" x2="760" y1="${y0}" y2="${y0}" stroke="#999" stroke-dasharray="3 4"/><text x="4" y="${y0-4}">z = 0 (eje)</text>
+ <line x1="${x0}" x2="${xJ}" y1="${y0}" y2="${y0}" stroke="#6b7a80" stroke-width="${th(S.D1)}"/><line x1="${xJ}" x2="${xB}" y1="${y0}" y2="${y0}" stroke="#8a979c" stroke-width="${th(S.D2)}"/>
+ <circle cx="${xP}" cy="${y0}" r="17" fill="${S.pump?'#0b6e75':'#fff'}" stroke="#0b6e75" stroke-width="2" ${S.pump?'':'stroke-dasharray="4 3"'}/><text x="${xP}" y="${y0+4}" text-anchor="middle" style="fill:${S.pump?'#fff':'#0b6e75'}">B</text>
+ <polyline points="${P(Ep)}" fill="none" stroke="#1f5fbf" stroke-width="2.2"/><polyline points="${P(Hp)}" fill="none" stroke="#2f8f4e" stroke-width="2.2" stroke-dasharray="6 3"/>
+ <text x="22" y="${Y(S.zA)-14}">A: z_A = ${fm('len',S.zA,3)}</text><text x="${xB}" y="${Y(S.zB)-14}">B: z_B = ${fm('len',S.zB,3)}</text>
+ <text x="${xJ}" y="${y0+th(Math.max(S.D1,S.D2))/2+14}" text-anchor="middle">D₁=${fm('dia',S.D1,3)} → D₂=${fm('dia',S.D2,3)}</text>
+ <text x="${(xP+xJ)/2}" y="${y0+th(S.D1)/2+28}" text-anchor="middle">L₁=${fm('len',S.L1,3)}</text><text x="${(xJ+xB)/2}" y="${y0+th(S.D2)/2+28}" text-anchor="middle">L₂=${fm('len',S.L2,3)}</text>
+ <text x="${xP+20}" y="${Y(E[2])-8}">E: ${fm('len',E[2],3)}</text><text x="${xB-130}" y="${Y(E[7])-10}">E: ${fm('len',E[7],3)} (tras acc. T2)</text>
+ <text x="560" y="372" style="fill:#1f5fbf">— Energía</text><text x="640" y="372" style="fill:#2f8f4e">- - Piezométrica</text>`;
+ $('sch').innerHTML=o;}
+function drawChart(R){const c=$('chart');if(!R){c.innerHTML='<text x="260" y="130" text-anchor="middle">No vigente</text>';return;}
+ const{S,pr,Q}=R,Qm=S.pump?S.Q0:Math.max(Q*2,1e-4),N=60,sys=[],pm=[];
+ for(let i=0;i<=N;i++){const q=Qm*i/N;sys.push([q,S.zB-S.zA+losses(q,S,pr).sum]);if(S.pump)pm.push([q,Hb(q,S)]);}
+ const ys=sys.map(p=>p[1]).concat(pm.map(p=>p[1])),ylo=Math.min(0,...ys),yhi=Math.max(...ys)*1.05||1,X=q=>50+q/Qm*440,Y=h=>220-(h-ylo)/(yhi-ylo)*200,P=a=>a.map(p=>X(p[0])+','+Y(p[1])).join(' ');
+ c.innerHTML=`<rect x="50" y="20" width="440" height="200" fill="none" stroke="#999"/><line x1="50" x2="490" y1="${Y(0)}" y2="${Y(0)}" stroke="#bbb"/>
+ <polyline points="${P(sys)}" fill="none" stroke="#a3262a" stroke-width="2"/>${S.pump?`<polyline points="${P(pm)}" fill="none" stroke="#0b6e75" stroke-width="2"/>`:''}
+ <circle cx="${X(Q)}" cy="${Y(S.zB-S.zA+R.L.sum)}" r="5" fill="#000"/>
+ <text x="270" y="250" text-anchor="middle">Q [${uL('Q')}]: 0 … ${fmtN(toU('Q',Qm))}</text><text x="4" y="14">Carga [${uL('len')}]: ${fmtN(toU('len',ylo))} … ${fmtN(toU('len',yhi))}</text>
+ <text x="60" y="36" style="fill:#a3262a">Sistema: z_B − z_A + Σh_L(Q)</text>${S.pump?`<text x="60" y="50" style="fill:#0b6e75">Bomba H_b(Q)</text>`:''}<text x="${Math.min(X(Q)+8,380)}" y="${Y(S.zB-S.zA+R.L.sum)-8}">● Q = ${fm('Q',Q,3)}</text>`;}
+/* ===== 9. DOCUMENTACIÓN ===== */
+function docs(){const T=selfTests();$('doc').innerHTML=`<h2>Documentación, fuentes y estado</h2>
+<details open><summary>Objetivo, alcance e hipótesis</summary><p>Calcula el caudal estacionario Q entre dos depósitos grandes abiertos a p_atm, unidos por dos tramos circulares en serie, horizontales y llenos, con bomba opcional junto a la salida de A. Fluido newtoniano, incompresible, T uniforme; velocidad nula en superficies libres y niveles constantes durante cada cálculo; datum z = 0 en el eje. Sólo flujo A→B. No incluye redes en paralelo, golpe de ariete ni transitorios; la animación (si la hubiera) sería ilustrativa. Q es la incógnita (no se pide como dato). Líneas de energía/piezométrica con α = 1 (laminar: α = 2, aproximación limitada).</p></details>
+<details><summary>Ecuaciones (numeración = código)</summary><div class="eq">(1) A = πD²/4 · (2) V = Q/A · (3) Re = ρ|V|D/μ</div><div class="eq">(4) 1/√f = −2 log₁₀[ε/(3.7D) + 2.51/(Re√f)] (Colebrook–White, Re ≥ 4000, ε/D ≤ 0.05; iteración con semilla de Haaland)</div><div class="eq">(5) f = 64/Re (Re ≤ 2000) · (6) 2000 < Re < 4000: interpolación lineal entre f(2000)=0.032 y f_Colebrook(4000); continua, aproximada, NO es ley física validada</div><div class="eq">(7) h_f = f (L/D) V²/2g · (8) h_m = K V_ref²/2g · g = 9.80665 m/s²</div><div class="eq">(9) Contracción brusca: K = 0.42(1−β²), β = D₂/D₁, ref. V₂ · (10) Expansión brusca: K = (1−β²)², β = D₁/D₂, ref. V₁ (Borda–Carnot). Geometría supuesta: cambio brusco de borde vivo; o K ingresado (ref. V₂)</div>
+<div class="eq">(11) H_b = H₀[1−(Q/Q₀)²], 0 ≤ Q ≤ Q₀ (H₀: carga a Q=0; Q₀: caudal con carga cero). Curva didáctica salvo datos publicados.</div><div class="eq">(12) z_A + H_b(Q) = z_B + Σh_L(Q), con Σh_L = h_ent + h_f1 + h_m1 + h_tr + h_f2 + h_m2 + h_sal (la energía cinética de descarga ya está en K_sal = 1; no se suma otra vez) · (13) r_H = z_A + H_b − z_B − Σh_L</div>
+<div class="eq">(14) E = h_piez + αV²/2g, α = 1 · (15) p_abs = p_atm + ρ g h_piez (z = 0) · (16) NPSHd = (p_atm − pᵥ)/(ρg) + z_A − h_ent (bomba junto a la salida de A, sin tubería antes) · (17) ρA₁V₁ = ρA₂V₂</div><div class="eq">(18) Agua: ρ(T)=1000[1−(T−3.9863)²(T+288.9414)/(508929.2(T+68.12963))] (a); μ(T)=2.414×10⁻⁵·10^(247.8/(T+133.15)) (b); pᵥ(T)=0.61094·exp[17.625T/(T+243.04)] kPa (c); T en °C</div></details>
+<details><summary>Fuentes y estado de los datos</summary><p>ε: Çengel y Cimbala, <i>Fluid Mechanics</i>, Tabla 8-2 (tubo estirado 0.0015 mm; acero comercial 0.045 mm; galvanizado 0.15 mm; fundido 0.26 mm). K_ent = 0.5 y K_sal = 1.0: Tabla 8-4 del mismo texto. Contracción: White, <i>Fluid Mechanics</i> (K≈0.42(1−β²)). Colebrook (1939). pᵥ: coeficientes de Alduchov y Eskridge (1996) (forma tipo Magnus). Densidad y viscosidad del agua: coeficientes heredados de la maqueta; <b>fuente primaria por confirmar y cotejo con tablas pendiente</b>. Los valores de ε y K deben verificarse en el libro antes del reporte.</p>
+<p><b>Requisito pendiente:</b> la lista de 5 fluidos reales. Sólo el agua tiene correlaciones en la app; se retiraron etanol, glicerina, mercurio y "SAE 30" de la maqueta por no tener fuente verificada. El fluido personalizado usa datos del usuario (ρ, μ, pᵥ opcional), sin dependencia de T.</p></details>
+<details><summary>Método numérico y tolerancias</summary><p>Bisección sobre r_H(Q), decreciente en Q. Con bomba: intervalo [0, Q₀]. Sin bomba: Q_sup = 10⁻⁴ m³/s duplicado hasta r_H<0 (límite ${NUM.QCAP} m³/s). Paro: Q_sup−Q_inf ≤ ${NUM.TOL_Q_ABS} m³/s + ${NUM.TOL_Q_REL}·Q_sup; máx. ${NUM.MAXIT} iteraciones; se exige |r_H| ≤ ${NUM.TOL_R} m. Un residuo cero prueba que la ecuación se resolvió, no que el modelo sea correcto.</p></details>
+<details><summary>Unidades (factores)</summary><p>1 ft = 0.3048 m; 1 in = 0.0254 m; 1 lbm = 0.45359237 kg (1 lbm/ft³ = 16.01846337 kg/m³); 1 lbf/in² = 6894.757293168 Pa; 1 US gal = 3.785411784 L; 1 ft³ = 0.028316846592 m³; 1 lbm/(ft·s) = 1.488163944 Pa·s; T[°F] = 1.8 T[°C] + 32. El estado interno es SI.</p></details>
+<details><summary>Manual breve</summary><p>Elija fluido; ajuste con deslizador o escriba el valor exacto; los resultados se actualizan solos. Un campo en rojo es inválido y los resultados quedan "no vigentes". "Restablecer ejemplo" recupera los valores iniciales.</p></details>
+<details open><summary>Estado de validación</summary><p>Prototipo de primer avance. <b>Validación bibliográfica (≥ 3 casos publicados, ± 2 %) PENDIENTE.</b> Las pruebas internas abajo verifican consistencia, no corrección física.</p>
+<table><tr><th>Prueba interna<th>Resultado</tr>${T.map(x=>`<tr><td>${x[0]} ${x[2]?'('+x[2]+')':''}<td style="color:var(--${x[1]?'ok':'err'})">${x[1]?'PASA':'FALLA'}</tr>`).join('')}</table></details>
+<details><summary>Declaración de uso de IA</summary><p>Código generado con Claude (Anthropic) a partir de la maqueta del equipo. La IA no es fuente de datos físicos. El equipo debe completar la atribución por componente (Anexo B), la bitácora (A) y el registro de verificación (C); aquí no se registra participación de los integrantes.</p></details>`;}
+$('bSI').onclick=()=>{UNIT='si';run();};$('bEN').onclick=()=>{UNIT='en';run();};$('bReset').onclick=()=>{S=defaults();run();};
+build();run();docs();}
+</script></body></html>
